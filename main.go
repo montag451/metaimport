@@ -98,7 +98,7 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 	components := strings.Split(pkgName, "/")
 	if err := tmpl.Execute(repo, components); err != nil {
 		log.Println(err)
-		w.WriteHeader(http.StatusBadRequest)
+		http.NotFound(w, r)
 		return
 	}
 	pkgInfo := pkgInfo{
