@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 )
 
@@ -26,7 +27,7 @@ type config struct {
 	Host  string
 	Port  uint16
 	Tls   *tls
-	Paths []path
+	Paths []importPath
 }
 
 type tls struct {
@@ -34,7 +35,7 @@ type tls struct {
 	PrivKey string `json:"priv_key"`
 }
 
-type path struct {
+type importPath struct {
 	Prefix       string
 	RepoTemplate string `json:"repo_template"`
 }
@@ -87,7 +88,13 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repo := &strings.Builder{}
-	tmpl := template.Must(template.New("").Parse(tmplStr))
+	tmpl := template.New("")
+	tmpl.Funcs(template.FuncMap{
+		"join": func(elems []string) string {
+			return path.Join(elems...)
+		},
+	})
+	tmpl = template.Must(tmpl.Parse(tmplStr))
 	components := strings.Split(pkgName, "/")
 	if err := tmpl.Execute(repo, components); err != nil {
 		log.Println(err)
