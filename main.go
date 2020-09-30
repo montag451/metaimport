@@ -53,10 +53,7 @@ func parseConfig(r io.Reader) *config {
 		switch err.(type) {
 		case *json.SyntaxError:
 			err := err.(*json.SyntaxError)
-			log.Fatalf(
-				"conf: syntax error at pos %d: %s\n",
-				err.Offset, err,
-			)
+			log.Fatalf("conf: syntax error at pos %d: %s\n", err.Offset, err)
 		case *json.UnmarshalTypeError:
 			err := err.(*json.UnmarshalTypeError)
 			log.Fatalln("conf: bad configuration file", err)
@@ -132,12 +129,7 @@ func main() {
 	if conf.Tls == nil {
 		err = http.ListenAndServe(addr, nil)
 	} else {
-		err = http.ListenAndServeTLS(
-			addr,
-			conf.Tls.Cert,
-			conf.Tls.PrivKey,
-			nil,
-		)
+		err = http.ListenAndServeTLS(addr, conf.Tls.Cert, conf.Tls.PrivKey, nil)
 	}
 	if err != nil {
 		log.Fatal(err)
