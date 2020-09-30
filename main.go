@@ -53,12 +53,12 @@ func parseConfig(r io.Reader) *config {
 		switch err.(type) {
 		case *json.SyntaxError:
 			err := err.(*json.SyntaxError)
-			log.Fatalf("conf: syntax error at pos %d: %s\n", err.Offset, err)
+			log.Fatalf("conf: syntax error at pos %d: %s", err.Offset, err)
 		case *json.UnmarshalTypeError:
 			err := err.(*json.UnmarshalTypeError)
 			log.Fatalln("conf: bad configuration file", err)
 		default:
-			log.Fatalf("conf: %s\n", err)
+			log.Fatalf("conf: %s", err)
 		}
 	}
 	return &conf
@@ -66,12 +66,12 @@ func parseConfig(r io.Reader) *config {
 
 func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("go-get") != "1" {
-		log.Println("not a go-get query")
+		log.Printf("not a go-get query %q", r.URL.String())
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	pkgName := r.Host + r.URL.Path
-	log.Println("request for", pkgName)
+	log.Printf("request for %q", pkgName)
 	var tmplStr string
 	for _, path := range conf.Paths {
 		if strings.HasPrefix(pkgName, path.Prefix) {
@@ -80,7 +80,7 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if tmplStr == "" {
-		log.Printf("unable to match package: %s\n", pkgName)
+		log.Printf("unable to match package %q", pkgName)
 		http.NotFound(w, r)
 		return
 	}
