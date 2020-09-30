@@ -16,7 +16,7 @@ import (
 var htmlTemplate = template.Must(template.New("").Parse(`
 <html>
   <head>
-    <meta name="go-import" content="{{ .Name }} git {{ .Repo }}">
+    <meta name="go-import" content="{{ .Name }} {{ .VCS }} {{ .Repo }}">
   </head>
   <body>
   </body>
@@ -37,11 +37,13 @@ type tls struct {
 
 type importPath struct {
 	Prefix       string
+	VCS          string
 	RepoTemplate string `json:"repo_template"`
 }
 
 type pkgInfo struct {
 	Name string
+	VCS  string
 	Repo string
 }
 
@@ -72,14 +74,14 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 	}
 	pkgName := r.Host + r.URL.Path
 	log.Printf("request for %q", pkgName)
-	var tmplStr string
+	var p *importPath
 	for _, path := range conf.Paths {
 		if strings.HasPrefix(pkgName, path.Prefix) {
-			tmplStr = path.RepoTemplate
+			p = &path
 			break
 		}
 	}
-	if tmplStr == "" {
+	if p == nil {
 		log.Printf("unable to match package %q", pkgName)
 		http.NotFound(w, r)
 		return
@@ -91,7 +93,7 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 			return path.Join(elems...)
 		},
 	})
-	tmpl = template.Must(tmpl.Parse(tmplStr))
+	tmpl = template.Must(tmpl.Parse(p.RepoTemplate))
 	components := strings.Split(pkgName, "/")
 	if err := tmpl.Execute(repo, components); err != nil {
 		log.Println(err)
@@ -100,6 +102,7 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 	}
 	pkgInfo := pkgInfo{
 		Name: pkgName,
+		VCS:  p.VCS,
 		Repo: repo.String(),
 	}
 	html := &strings.Builder{}
