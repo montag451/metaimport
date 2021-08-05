@@ -1,16 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+	"time"
+
+	loc_en "github.com/go-playground/locales/en"
+	ut "github.com/go-playground/universal-translator"
+	"github.com/go-playground/validator/v10"
+	trans_en "github.com/go-playground/validator/v10/translations/en"
 )
 
 var htmlTemplate = template.Must(template.New("").Parse(`
@@ -23,22 +30,49 @@ var htmlTemplate = template.Must(template.New("").Parse(`
 </html>
 `))
 
+type duration time.Duration
+
+func (d *duration) UnmarshalJSON(b []byte) error {
+	if bytes.Equal(b, []byte("null")) {
+		return nil
+	}
+	var v interface{}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch value := v.(type) {
+	case float64:
+		*d = duration(value)
+		return nil
+	case string:
+		var err error
+		tmp, err := time.ParseDuration(value)
+		if err != nil {
+			return err
+		}
+		*d = duration(tmp)
+		return nil
+	default:
+		return errors.New("invalid duration")
+	}
+}
+
 type config struct {
-	Host  string
-	Port  uint16
-	Tls   *tls
-	Paths []importPath
+	Addr        string       `json:"addr" validate:"hostname_port"`
+	ReadTimeout duration     `json:"read_timeout" validate:"min=1s"`
+	TLS         *tls         `json:"tls"`
+	Paths       []importPath `json:"paths" validate:"min=1,dive"`
 }
 
 type tls struct {
-	Cert    string
-	PrivKey string `json:"priv_key"`
+	Cert    string `json:"cert" validate:"required,file"`
+	PrivKey string `json:"priv_key" validate:"required,file"`
 }
 
 type importPath struct {
-	Prefix       string
+	Prefix       string `json:"prefix" validate:"required"`
 	VCS          string
-	RepoTemplate string `json:"repo_template"`
+	RepoTemplate string `json:"repo_template" validate:"required"`
 }
 
 type pkgInfo struct {
@@ -125,14 +159,37 @@ func main() {
 		log.Fatal(err)
 	}
 	conf := parseConfig(confFile)
+	v := validator.New()
+	trans := ut.New(loc_en.New())
+	trans_en.RegisterDefaultTranslations(v, trans.GetFallback())
+	v.RegisterTranslation("file", trans.GetFallback(), func(ut ut.Translator) error {
+		return ut.Add("file", "{0} does not exist or is not accessible", true)
+	}, func(ut ut.Translator, fe validator.FieldError) string {
+		s, _ := ut.T("file", fe.Value().(string))
+		return s
+	})
+	if err := v.Struct(conf); err != nil {
+		var vErr validator.ValidationErrors
+		if errors.As(err, &vErr) {
+			log.Println("some errors were found in the configuration file:")
+			for _, err := range vErr {
+				fmt.Printf("%s: %s\n", err.Namespace(), err.Translate(trans.GetFallback()))
+			}
+			log.Fatalf("invalid configuration file %q", os.Args[1])
+		}
+		panic(err)
+	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handler(conf, w, r)
 	})
-	addr := net.JoinHostPort(conf.Host, fmt.Sprintf("%d", conf.Port))
-	if conf.Tls == nil {
-		err = http.ListenAndServe(addr, nil)
+	server := http.Server{
+		Addr:        conf.Addr,
+		ReadTimeout: time.Duration(conf.ReadTimeout),
+	}
+	if conf.TLS == nil {
+		err = server.ListenAndServe()
 	} else {
-		err = http.ListenAndServeTLS(addr, conf.Tls.Cert, conf.Tls.PrivKey, nil)
+		err = server.ListenAndServeTLS(conf.TLS.Cert, conf.TLS.PrivKey)
 	}
 	if err != nil {
 		log.Fatal(err)
