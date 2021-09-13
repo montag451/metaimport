@@ -75,10 +75,11 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 	pkgName := r.Host + r.URL.Path
 	log.Printf("request for %q", pkgName)
 	var p *importPath
-	for _, path := range conf.Paths {
-		if strings.HasPrefix(pkgName, path.Prefix) {
-			p = &path
-			break
+	pl := 0
+	for i, path := range conf.Paths {
+		if strings.HasPrefix(pkgName, path.Prefix) && len(path.Prefix) >= pl {
+			p = &conf.Paths[i]
+			pl = len(path.Prefix)
 		}
 	}
 	if p == nil {
