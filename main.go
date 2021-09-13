@@ -13,8 +13,7 @@ import (
 	"strings"
 )
 
-var htmlTemplate = template.Must(template.New("").Parse(`
-<html>
+var htmlTemplate = template.Must(template.New("").Parse(`<html>
   <head>
     <meta name="go-import" content="{{ .Name }} {{ .VCS }} {{ .Repo }}">
   </head>
