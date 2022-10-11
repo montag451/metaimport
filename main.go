@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"io"
 	"log"
@@ -10,17 +9,28 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 )
 
-var htmlTemplate = template.Must(template.New("").Parse(`<html>
+var mainTemplate = template.Must(template.New("main").Parse(`
+{{- /* This is the template used to render the HTML page */ -}}
+<html>
   <head>
-    <meta name="go-import" content="{{ .Name }} {{ .VCS }} {{ .Repo }}">
+    <meta name="go-import" content="{{ .Prefix }} {{ .VCS }} {{ .Repo }}">
   </head>
   <body>
   </body>
 </html>
 `))
+
+func init() {
+	mainTemplate.Funcs(template.FuncMap{
+		"join": func(elems []string) string {
+			return path.Join(elems...)
+		},
+	})
+}
 
 type config struct {
 	Host  string
@@ -36,14 +46,15 @@ type tls struct {
 
 type importPath struct {
 	Prefix       string
+	NbComponents int `json:"nb_components"`
 	VCS          string
 	RepoTemplate string `json:"repo_template"`
 }
 
-type pkgInfo struct {
-	Name string
-	VCS  string
-	Repo string
+type metaImport struct {
+	Prefix string
+	VCS    string
+	Repo   string
 }
 
 func parseConfig(r io.Reader) *config {
@@ -65,6 +76,10 @@ func parseConfig(r io.Reader) *config {
 	return &conf
 }
 
+func templateNameForImportPath(i int) string {
+	return "path-" + strconv.Itoa(i)
+}
+
 func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("go-get") != "1" {
 		log.Printf("not a go-get query %q", r.URL.String())
@@ -72,12 +87,14 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pkgName := r.Host + r.URL.Path
+	components := strings.Split(pkgName, "/")
 	log.Printf("request for %q", pkgName)
 	var p *importPath
-	pl := 0
+	pi, pl := 0, 0
 	for i, path := range conf.Paths {
-		if strings.HasPrefix(pkgName, path.Prefix) && len(path.Prefix) >= pl {
+		if path.NbComponents <= len(components) && strings.HasPrefix(pkgName, path.Prefix) && len(path.Prefix) >= pl {
 			p = &conf.Paths[i]
+			pi = i
 			pl = len(path.Prefix)
 		}
 	}
@@ -87,26 +104,19 @@ func handler(conf *config, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repo := &strings.Builder{}
-	tmpl := template.New("")
-	tmpl.Funcs(template.FuncMap{
-		"join": func(elems []string) string {
-			return path.Join(elems...)
-		},
-	})
-	tmpl = template.Must(tmpl.Parse(p.RepoTemplate))
-	components := strings.Split(pkgName, "/")
-	if err := tmpl.Execute(repo, components); err != nil {
-		log.Println(err)
+	tmplName := templateNameForImportPath(pi)
+	if err := mainTemplate.ExecuteTemplate(repo, tmplName, components); err != nil {
+		log.Printf("failed to execute template for %q: %v", pkgName, err)
 		http.NotFound(w, r)
 		return
 	}
-	pkgInfo := pkgInfo{
-		Name: pkgName,
-		VCS:  p.VCS,
-		Repo: repo.String(),
+	mi := metaImport{
+		Prefix: strings.Join(components[:p.NbComponents], "/"),
+		VCS:    p.VCS,
+		Repo:   repo.String(),
 	}
 	html := &strings.Builder{}
-	if err := htmlTemplate.Execute(html, pkgInfo); err != nil {
+	if err := mainTemplate.Execute(html, mi); err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -125,10 +135,18 @@ func main() {
 		log.Fatal(err)
 	}
 	conf := parseConfig(confFile)
+	for i := range conf.Paths {
+		p := &conf.Paths[i]
+		if p.NbComponents <= 0 {
+			p.NbComponents = len(strings.Split(p.Prefix, "/"))
+		}
+		name := templateNameForImportPath(i)
+		template.Must(mainTemplate.New(name).Parse(p.RepoTemplate))
+	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handler(conf, w, r)
 	})
-	addr := net.JoinHostPort(conf.Host, fmt.Sprintf("%d", conf.Port))
+	addr := net.JoinHostPort(conf.Host, strconv.FormatUint(uint64(conf.Port), 10))
 	if conf.Tls == nil {
 		err = http.ListenAndServe(addr, nil)
 	} else {
